@@ -32,34 +32,28 @@ class Kernel implements HttpKernelInterface
         $this->parseOptions($options);
     }
 
-    protected function parseOptions(array $options)
+    public function handle(Request $request, $type = self::MASTER_REQUEST, $check = true)
     {
-        $this->addToBlacklist($this->getWithDefault($options, 'blacklist'));
-        $this->addToWhitelist($this->getWithDefault($options, 'whitelist'));
-        $this->setPrerenderToken($this->getWithDefault($options, 'prerenderToken'));
+        if ($this->shouldPrerenderPage($request)) {
+            return $this->app->handle($request, $type, $check);
+        }
 
-        $this->setBackendUrl($this->getWithDefault(
-            $options,
-            'backendUrl',
-            DefaultSettings::$backendUrl
-        ));
-
-        $this->skipExtensions($this->getWithDefault(
-            $options,
-            'ignoredExtensions',
-            DefaultSettings::$ignoredExtensions
-        ));
-
-        $this->botUserAgents = array_flip($this->getWithDefault(
-            $options,
-            'botUserAgents',
-            DefaultSettings::$botUserAgents
-        ));
+        return $this->app->handle($request, $type, $check);
     }
 
-    protected function getWithDefault(array $array, $key, $default = null)
+    public function shouldPrerenderPage(Request $request)
     {
-        return isset($array[$key]) ? $array[$key] : $default;
+        if ($this->isCacheable($request) && $this->isPrerenderable($request)) {
+            if ($this->isMappedAjaxCrawl($request)) {
+                return true;
+            }
+
+            if ($this->isBot($request)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function setBackendUrl($url)
@@ -96,39 +90,77 @@ class Kernel implements HttpKernelInterface
         return $this;
     }
 
-    public function prerenderForBots($bots)
+    public function prerenderForUserAgents($bots)
     {
         $this->applyMethod('prerenderForBot', $bots);
 
         return $this;
     }
 
+    public function skipForUserAgents($bots)
+    {
+        $this->applyMethod('skipForBot', $bots);
+
+        return $this;
+    }
+
     public function addToBlacklist($paths)
     {
-        $this->applyMethod('prerenderExtension', $paths);
+        $this->applyMethod('blacklistPath', $paths);
 
         return $this;
     }
 
     public function dropFromBlacklist($paths)
     {
-        $this->applyMethod('skipExtension', $paths);
+        $this->applyMethod('forgetBlacklisted', $paths);
 
         return $this;
     }
 
     public function addToWhitelist($paths)
     {
-        $this->applyMethod('prerenderExtension', $paths);
+        $this->applyMethod('whitelistPath', $paths);
 
         return $this;
     }
 
     public function dropFromWhitelist($paths)
     {
-        $this->applyMethod('skipExtension', $paths);
+        $this->applyMethod('forgetWhitelisted', $paths);
 
         return $this;
+    }
+
+
+    protected function parseOptions(array $options)
+    {
+        $this->addToBlacklist($this->getWithDefault($options, 'blacklist'));
+        $this->addToWhitelist($this->getWithDefault($options, 'whitelist'));
+        $this->setPrerenderToken($this->getWithDefault($options, 'prerenderToken'));
+
+        $this->setBackendUrl($this->getWithDefault(
+            $options,
+            'backendUrl',
+            DefaultSettings::$backendUrl
+        ));
+
+        $this->skipExtensions($this->getWithDefault(
+            $options,
+            'ignoredExtensions',
+            DefaultSettings::$ignoredExtensions
+        ));
+
+        $this->prerenderForUserAgents($this->getWithDefault(
+            $options,
+            'botUserAgents',
+            DefaultSettings::$botUserAgents
+        ));
+    }
+
+    protected function getWithDefault(array $array, $key, $default = null)
+    {
+        return isset($array[$key]) ? $array[$key] : $default;
     }
 
     protected function applyMethod($name, $args)
@@ -138,7 +170,9 @@ class Kernel implements HttpKernelInterface
 
     protected function xArgs(callable $callable, $crossApplicable)
     {
-        if (!is_array($crossApplicable)) {
+        if (null === $crossApplicable) {
+            return null;
+        } elseif (!is_array($crossApplicable)) {
             $crossApplicable = [$crossApplicable];
         }
 
@@ -161,6 +195,20 @@ class Kernel implements HttpKernelInterface
     protected function skipExtension($extension)
     {
         $this->ignoredExtensions[$this->normalizeExtension($extension)] = true;
+
+        return $this;
+    }
+
+    protected function prerenderForBot($bot)
+    {
+        $this->botUserAgents[$bot] = true;
+
+        return $this;
+    }
+
+    protected function skipForBot($bot)
+    {
+        unset($this->botUserAgents[$bot]);
 
         return $this;
     }
@@ -198,12 +246,69 @@ class Kernel implements HttpKernelInterface
         return '.' . ltrim($extension, '.');
     }
 
-    public function handle(Request $request, $type = self::MASTER_REQUEST, $check = true)
+    protected function getIgnoredExtensions()
     {
-        if ('GET' !== $request->getRealMethod()) {
-            return $this->app->handle($request, $type, $check);
+        return array_keys($this->ignoredExtensions);
+    }
+
+    protected function isCacheable(Request $request)
+    {
+        return 'GET' === $request->getRealMethod();
+    }
+
+    protected function isPrerenderable(Request $request)
+    {
+        if ($this->isIgnoredExtension($request)) {
+            return false;
         }
 
-        return $this->app->handle($request, $type, $check);
+        if (!empty($this->whitelist) && $this->isWhitelisted($request)) {
+            return true;
+        }
+
+        if (!empty($this->blacklist && $this->isBlacklisted($request))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    protected function isIgnoredExtension(Request $request)
+    {
+        foreach ($this->ignoredExtensions as $extension => $placeholder) {
+            if (false !== stripos($request->getRequestUri(), $extension)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function isWhitelisted(Request $request)
+    {
+
+    }
+
+    protected function isBlacklisted(Request $request)
+    {
+
+    }
+
+    protected function isMappedAjaxCrawl(Request $request)
+    {
+        return null !== $request->query->get('_escaped_fragment_');
+    }
+
+    protected function isBot(Request $request)
+    {
+        $agent = strtolower($request->headers->get('User-Agent'));
+
+        foreach ($this->botUserAgents as $userAgent => $placeholder) {
+            if (false !== stripos($userAgent, $agent)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 } 

@@ -64,6 +64,6 @@ class DefaultSettings
         'bufferbot',
         'quora link preview',
         'showyoubot',
-        'outbrain'
+        'outbrain',
     ];
 } 

@@ -54,6 +54,54 @@ class KernelTest extends PHPUnit_Framework_TestCase
         $this->assertEquals($validUrl, $backendUrl);
     }
 
+    /**
+     * @test
+     *
+     * @dataProvider appProvider
+     */
+    public function kernel_allows_prerender_tokens(HttpKernelInterface $app)
+    {
+        $token = 'token_token';
+
+        $kernel = new Kernel($app, ['prerenderToken' => $token]);
+
+        $storedToken = $this->inaccessiblePropertyInspector($kernel, 'prerenderToken');
+
+        $this->assertEquals($token, $storedToken);
+    }
+
+    /**
+     * @test
+     *
+     * @dataProvider appProvider
+     */
+    public function kernel_allows_blacklisting_of_urls(HttpKernelInterface $app)
+    {
+        $pattern = '/admin/';
+
+        $kernel = new Kernel($app, ['blacklist' => $pattern]);
+
+        $blacklist = $this->inaccessiblePropertyInspector($kernel, 'blacklist');
+
+        $this->assertArrayHasKey($pattern, $blacklist);
+    }
+
+    /**
+     * @test
+     *
+     * @dataProvider appProvider
+     */
+    public function kernel_allows_whitelisting_of_urls(HttpKernelInterface $app)
+    {
+        $pattern = '/blog/';
+
+        $kernel = new Kernel($app, ['whitelist' => $pattern]);
+
+        $whitelist = $this->inaccessiblePropertyInspector($kernel, 'whitelist');
+
+        $this->assertArrayHasKey($pattern, $whitelist);
+    }
+
     protected function inaccessiblePropertyInspector($object, $property)
     {
         $reflectedProperty = new ReflectionProperty(get_class($object), $property);
