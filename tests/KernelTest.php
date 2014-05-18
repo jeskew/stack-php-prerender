@@ -5,34 +5,69 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 class KernelTest extends PHPUnit_Framework_TestCase
 {
-    public function tearDown()
-    {
-        Mockery::close();
-    }
-
     /**
      * @test
+     *
+     * @dataProvider basicKernelProvider
      */
-    public function kernel_returns_symfony_response()
+    public function kernel_returns_symfony_response(Kernel $app)
     {
-
-        $app = Mockery::mock('Symfony\Component\HttpKernel\HttpKernelInterface');
-
-        $app->shouldReceive('handle')
-            ->once()
-            ->andReturn(
-                Mockery::mock('Symfony\Component\HttpFoundation\Response')
-            );
-
-        $kernel = new Kernel($app);
-
-        $this->markTestIncomplete();
         $request = $this->getMock('Symfony\Component\HttpFoundation\Request');
 
         $this->assertInstanceOf(
             'Symfony\Component\HttpFoundation\Response',
-            $kernel->handle($request)
+            $app->handle($request)
         );
+    }
+
+    /**
+     * @test
+     *
+     * @dataProvider appProvider
+     */
+    public function kernel_allows_custom_backend_urls(HttpKernelInterface $app)
+    {
+        $validUrl = 'http://www.google.com';
+
+        $kernel = new Kernel($app, ['backendUrl' => $validUrl]);
+
+        $backendUrl = $this->inaccessiblePropertyInspector($kernel, 'backendUrl');
+
+        $this->assertEquals($validUrl, $backendUrl);
+    }
+
+    /**
+     * @test
+     *
+     * @dataProvider appProvider
+     *
+     * @expectedException InvalidArgumentException
+     */
+    public function kernel_disallows_malformed_backend_urls(HttpKernelInterface $app)
+    {
+        $validUrl = 'www.google.com';
+
+        $kernel = new Kernel($app, ['backendUrl' => $validUrl]);
+
+        $backendUrl = $this->inaccessiblePropertyInspector($kernel, 'backendUrl');
+
+        $this->assertEquals($validUrl, $backendUrl);
+    }
+
+    protected function inaccessiblePropertyInspector($object, $property)
+    {
+        $reflectedProperty = new ReflectionProperty(get_class($object), $property);
+
+        $reflectedProperty->setAccessible(true);
+
+        return $reflectedProperty->getValue($object);
+    }
+
+    public function basicKernelProvider()
+    {
+        $app = $this->appProvider()[0][0];
+
+        return [[new Kernel($app)]];
     }
 
     public function appProvider()
@@ -47,7 +82,7 @@ class KernelTest extends PHPUnit_Framework_TestCase
                 )
             );
 
-        return [[new Kernel($app)]];
+        return [[$app]];
     }
 }
  
