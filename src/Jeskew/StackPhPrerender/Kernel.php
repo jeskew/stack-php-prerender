@@ -286,12 +286,39 @@ class Kernel implements HttpKernelInterface
 
     protected function isWhitelisted(Request $request)
     {
+        foreach ($this->whitelist as $whitelisted => $token) {
+            if ($this->urlContains($whitelisted, $request->getRequestUri())) {
+                return true;
+            }
+        }
 
+        return false;
     }
 
     protected function isBlacklisted(Request $request)
     {
+        foreach ($this->blacklist as $blacklisted => $token) {
+            if ($this->urlContains($blacklisted, $request->getRequestUri())) {
+                return true;
+            }
 
+            if ($this->urlContains($blacklisted, $request->headers->get('Referer'))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function urlContains($pattern, $url)
+    {
+        $matches = preg_match("`{$pattern}`i", $url);
+
+        if ($matches) {
+            return true;
+        }
+
+        return false;
     }
 
     protected function isMappedAjaxCrawl(Request $request)
