@@ -3,8 +3,13 @@
 namespace Jeskew\StackPhPrerender;
 
 
+use DateTime;
+use Exception;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\RequestException;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 class Kernel implements HttpKernelInterface
@@ -13,6 +18,11 @@ class Kernel implements HttpKernelInterface
      * @var \Symfony\Component\HttpKernel\HttpKernelInterface
      */
     protected $app;
+
+    /**
+     * @var \GuzzleHttp\Client
+     */
+    protected $client;
 
     protected $blacklist;
 
@@ -34,8 +44,27 @@ class Kernel implements HttpKernelInterface
 
     public function handle(Request $request, $type = self::MASTER_REQUEST, $check = true)
     {
-        if ($this->shouldPrerenderPage($request)) {
-            return $this->app->handle($request, $type, $check);
+        if ($this->shouldPrerenderPage($request) && isset($this->client)) {
+            $response = new Response();
+
+            try {
+                $preRendered = $this->client->send(
+                    $this->generatePrerenderRequest($request)
+                );
+
+                $response->setContent((string) $preRendered->getBody());
+                $response->setStatusCode($preRendered->getStatusCode());
+            } catch (RequestException $e) {
+                $response->setStatusCode($e->getResponse()->getStatusCode());
+            } catch (Exception $e) {
+                $response->setStatusCode(500);
+            }
+
+            $response->headers->set(
+                'X-Prerendered-On', (new DateTime)->format(DateTime::ATOM)
+            );
+
+            return $response;
         }
 
         return $this->app->handle($request, $type, $check);
@@ -61,12 +90,19 @@ class Kernel implements HttpKernelInterface
         $parsedUrl = parse_url($url);
 
         if ($parsedUrl && isset($parsedUrl['host'])) {
-            $this->backendUrl = $url;
+            $this->backendUrl = rtrim($url, '/') . '/';
 
             return $this;
         }
 
         throw new InvalidArgumentException('Invalid backend url');
+    }
+
+    public function setClient(Client $client)
+    {
+        $this->client = $client;
+
+        return $this;
     }
 
     public function setPrerenderToken($token)
@@ -133,11 +169,29 @@ class Kernel implements HttpKernelInterface
     }
 
 
+    protected function generatePrerenderRequest(Request $request)
+    {
+        $prerenderRequest = $this->client
+            ->createRequest('GET', $this->backendUrl . $request->getUri());
+
+        if ($this->prerenderToken) {
+            $prerenderRequest->addHeader('X-Prerender-Token', $this->prerenderToken);
+        }
+
+        return $prerenderRequest;
+    }
+
     protected function parseOptions(array $options)
     {
         $this->addToBlacklist($this->getWithDefault($options, 'blacklist'));
         $this->addToWhitelist($this->getWithDefault($options, 'whitelist'));
         $this->setPrerenderToken($this->getWithDefault($options, 'prerenderToken'));
+
+        $this->setClient($this->getWithDefault(
+            $options,
+            'client',
+            DefaultSettings::guzzleClientFactory()
+        ));
 
         $this->setBackendUrl($this->getWithDefault(
             $options,

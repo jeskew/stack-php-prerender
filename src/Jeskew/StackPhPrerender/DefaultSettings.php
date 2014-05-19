@@ -3,6 +3,8 @@
 namespace Jeskew\StackPhPrerender;
 
 
+use GuzzleHttp\Client;
+
 class DefaultSettings
 {
     public static $backendUrl = 'http://service.prerender.io/';
@@ -66,4 +68,9 @@ class DefaultSettings
         'showyoubot',
         'outbrain',
     ];
+
+    public static function guzzleClientFactory()
+    {
+        return new Client();
+    }
 } 
